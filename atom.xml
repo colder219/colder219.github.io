@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <id>https://colder219.github.io</id>
+    <title>Gridea</title>
+    <updated>2022-12-01T07:23:37.702Z</updated>
+    <generator>https://github.com/jpmonette/feed</generator>
+    <link rel="alternate" href="https://colder219.github.io"/>
+    <link rel="self" href="https://colder219.github.io/atom.xml"/>
+    <subtitle>温故而知新</subtitle>
+    <logo>https://colder219.github.io/images/avatar.png</logo>
+    <icon>https://colder219.github.io/favicon.ico</icon>
+    <rights>All rights reserved 2022, Gridea</rights>
+    <entry>
+        <title type="html"><![CDATA[collectd 支持gpu监控]]></title>
+        <id>https://colder219.github.io/post/collectd-zhi-chi-gpu-jian-kong/</id>
+        <link href="https://colder219.github.io/post/collectd-zhi-chi-gpu-jian-kong/">
+        </link>
+        <updated>2022-11-22T12:42:06.000Z</updated>
+        <content type="html"><![CDATA[<h3 id="刚发现我都打好包了下面一条命令即可">刚发现我都打好包了，下面一条命令即可</h3>
+<pre><code>yum install datacenter-gpu-manager omg-gpu-collectd -y
+</code></pre>
+<p>然后就可以直接在grafana那边看机器的监控了。</p>
+<h2 id="下载collectd编译打包">下载collectd，编译打包</h2>
+<p>collectd 从5.8开始支持 nvidia 我们这里直接下载最新版并编译使支持</p>
+<blockquote>
+<p>参考</p>
+<p>https://collectd.org/download.shtml</p>
+<p>https://developer.nvidia.com/blog/gpu-telemetry-nvidia-dcgm/</p>
+</blockquote>
+<pre><code>wget https://storage.googleapis.com/collectd-tarballs/collectd-5.12.0.tar.bz2
+tar -xf collectd-5.12.0.tar.bz2
+cd collectd-5.12.0
+# 安装路径根据实际情况调整，编译的机器需要安装好cuda
+./configure --prefix /app/golang/collectd/ --enable-gpu-nvidia --with-cuda=/usr/local/cuda/
+make &amp;&amp; make install
+
+一般生产环境不止一台机器，每台都编译比较麻烦，可以根据实际情况，打一个安装包来给其它机器安装，这里给一下yum的方法
+这里是用了 fpm命令 具体如何使用 google一下
+build.sh
+
+mkdir -p rpm/package
+fpm -s dir -t rpm -n omg-collectd -v 1.0 \
+--rpm-user root --rpm-group root \
+--iteration $(date +&quot;%Y%m%d_%H%M%S&quot;) \
+-C $(pwd)/collectd \
+--description &quot;The XiaoChuanKeJi(IDC) Agent Package Created By SRE.&quot; \
+-d xiaochuan-supervisor \
+--pre-install $(pwd)/rpm/script/pre-install.sh \
+--post-install $(pwd)/rpm/script/install.sh \
+--post-uninstall $(pwd)/rpm/script/uninstall.sh \
+--after-upgrade $(pwd)/rpm/script/install.sh \
+--prefix /app/golang/collectd \
+-p $(pwd)/rpm/package
+
+</code></pre>
+<h2 id="安装dcgm">安装dcgm</h2>
+<p>dcgm 根据实际情况安装对应版本就行</p>
+<pre><code>yum erase -y datacenter-gpu-manager
+rpm -ivh datacenter-gpu-manager-1.7.2-1.x86_64.rpm
+systemctl enable --now dcgm.servic
+
+mkdir -p /usr/lib64/collectd/dcgm
+cp -rp /usr/local/dcgm/bindings/*.py  /usr/lib64/collectd/dcgm/
+cp -rp /usr/local/dcgm/samples/scripts/dcgm_collectd_plugin.py  /usr/lib64/collectd/dcgm/
+
+修改下脚本中g_dcgmLibPath 路径
+sed -i -e 's|\(g_dcgmLibPath =\) '&quot;'&quot;'/usr/lib'&quot;'&quot;'|\1 '&quot;'&quot;'/usr/lib64'&quot;'&quot;'|g' /usr/lib64/collectd/dcgm/dcgm_collectd_plugin.py
+
+给types.db 增加以下 这个文件根据你安装的增加
+如果influx第一次支持，在influxdb的types.db 也增加下下面的
+
+### DCGM types
+ecc_dbe_aggregate_total                  value:GAUGE:0:U
+ecc_sbe_aggregate_total                  value:GAUGE:0:U
+ecc_dbe_volatile_total                   value:GAUGE:0:U
+ecc_sbe_volatile_total                   value:GAUGE:0:U
+fb_free                                  value:GAUGE:0:U
+fb_total                                 value:GAUGE:0:U
+fb_used                                  value:GAUGE:0:U
+gpu_temp                                 value:GAUGE:U:U
+gpu_utilization                          value:GAUGE:0:100
+mem_copy_utilization                     value:GAUGE:0:100
+memory_clock                             value:GAUGE:0:U
+memory_temp                              value:GAUGE:U:U
+nvlink_bandwidth_total                   value:GAUGE:0:U
+nvlink_recovery_error_count_total        value:GAUGE:0:U
+nvlink_replay_error_count_total          value:GAUGE:0:U
+pcie_replay_counter                      value:GAUGE:0:U
+pcie_rx_throughput                       value:GAUGE:0:U
+pcie_tx_throughput                       value:GAUGE:0:U
+power_usage                              value:GAUGE:0:U
+power_violation                          value:GAUGE:0:U
+retired_pages_dbe                        value:GAUGE:0:U
+retired_pages_pending                    value:GAUGE:0:U
+retired_pages_sbe                        value:GAUGE:0:U
+sm_clock                                 value:GAUGE:0:U
+thermal_violation                        value:GAUGE:0:U
+total_energy_consumption                 value:GAUGE:0:U
+xid_errors                               value:GAUGE:0:U
+
+collectd.conf  增加以下
+
+LoadPlugin python
+&lt;Plugin python&gt;
+      ModulePath &quot;/usr/lib64/collectd/dcgm&quot;
+      LogTraces true
+      Interactive false
+      Import &quot;dcgm_collectd_plugin&quot;
+&lt;/Plugin&gt;
+
+然后重启collected
+
+如果日志有类似以下的内容 就说明collectd这边好了
+
+2021-10-19 19:39:31] uc_update: Value too old: name = sgal-omg-spam-newgpu01/dcgm_collectd-GPU-73dcaf1a-e5fe-b5eb-c417-ba9d4f726761/fb_total-0; value time = 1634643561.000; last cache update = 1634643561.000;
+
+</code></pre>
+<p>yum clean all &amp;&amp; yum remove omg-collectd -y &amp;&amp; rm -f /app/supervisor/conf/conf.d/collect.conf &amp;&amp; superctl update &amp;&amp; yum install omg-gpu-collectd -y</p>
+<p>yum clean all &amp;&amp; yum remove xiaochuan-collectd -y &amp;&amp; rm -f /app/supervisor/conf/conf.d/collect.conf &amp;&amp; superctl update &amp;&amp; yum install xiaochuan-gpu-collectd datacenter-gpu-manager -y</p>
+<h2 id="inluxdb">inluxdb</h2>
+<p>types.db增加以下</p>
+<pre><code>### DCGM types
+ecc_dbe_aggregate_total                  value:GAUGE:0:U
+ecc_sbe_aggregate_total                  value:GAUGE:0:U
+ecc_dbe_volatile_total                   value:GAUGE:0:U
+ecc_sbe_volatile_total                   value:GAUGE:0:U
+fb_free                                  value:GAUGE:0:U
+fb_total                                 value:GAUGE:0:U
+fb_used                                  value:GAUGE:0:U
+gpu_temp                                 value:GAUGE:U:U
+gpu_utilization                          value:GAUGE:0:100
+mem_copy_utilization                     value:GAUGE:0:100
+memory_clock                             value:GAUGE:0:U
+memory_temp                              value:GAUGE:U:U
+nvlink_bandwidth_total                   value:GAUGE:0:U
+nvlink_recovery_error_count_total        value:GAUGE:0:U
+nvlink_replay_error_count_total          value:GAUGE:0:U
+pcie_replay_counter                      value:GAUGE:0:U
+pcie_rx_throughput                       value:GAUGE:0:U
+pcie_tx_throughput                       value:GAUGE:0:U
+power_usage                              value:GAUGE:0:U
+power_violation                          value:GAUGE:0:U
+retired_pages_dbe                        value:GAUGE:0:U
+retired_pages_pending                    value:GAUGE:0:U
+retired_pages_sbe                        value:GAUGE:0:U
+sm_clock                                 value:GAUGE:0:U
+thermal_violation                        value:GAUGE:0:U
+total_energy_consumption                 value:GAUGE:0:U
+xid_errors                               value:GAUGE:0:U
+</code></pre>
+<p>查看有没有以下表 查一下数据 有的话说明数据已经进来了</p>
+<p>dcgm_collectd_value</p>
+<h2 id="grafana">grafana</h2>
+<p>创建一个dashboard 和一些panel</p>
+<p>也可以下载 <a href="https://raw.githubusercontent.com/colder219/picbed/master/imagesGPU-DASHBOARD2.json"> GPU-DASHBOARD.json</a> 导入即可</p>
+<figure data-type="image" tabindex="1"><img src="https://raw.githubusercontent.com/colder219/picbed/master/imagesscreen-shot2021-10-20%2011.32.47.jpg" alt="效果图片" loading="lazy"></figure>
+<figure data-type="image" tabindex="2"><img src="https://raw.githubusercontent.com/colder219/picbed/master/images202112231409799.jpg" alt="screen-shot 2021-07-12 at 17.44.36" loading="lazy"></figure>
+<p>不知道川皇能不能传上去</p>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Hello Gridea]]></title>
+        <id>https://colder219.github.io/post/hello-gridea/</id>
+        <link href="https://colder219.github.io/post/hello-gridea/">
+        </link>
+        <updated>2018-12-11T16:00:00.000Z</updated>
+        <summary type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+]]></summary>
+        <content type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+<!-- more -->
+<p><a href="https://github.com/getgridea/gridea">Github</a><br>
+<a href="https://gridea.dev/">Gridea 主页</a><br>
+<a href="https://fehey.com/">示例网站</a></p>
+<h2 id="特性">特性👇</h2>
+<p>📝  你可以使用最酷的 <strong>Markdown</strong> 语法，进行快速创作</p>
+<p>🌉  你可以给文章配上精美的封面图和在文章任意位置插入图片</p>
+<p>🏷️  你可以对文章进行标签分组</p>
+<p>📋  你可以自定义菜单，甚至可以创建外部链接菜单</p>
+<p>💻  你可以在 <strong>Windows</strong>，<strong>MacOS</strong> 或 <strong>Linux</strong> 设备上使用此客户端</p>
+<p>🌎  你可以使用 <strong>𝖦𝗂𝗍𝗁𝗎𝖻 𝖯𝖺𝗀𝖾𝗌</strong> 或 <strong>Coding Pages</strong> 向世界展示，未来将支持更多平台</p>
+<p>💬  你可以进行简单的配置，接入 <a href="https://github.com/gitalk/gitalk">Gitalk</a> 或 <a href="https://github.com/SukkaW/DisqusJS">DisqusJS</a> 评论系统</p>
+<p>🇬🇧  你可以使用<strong>中文简体</strong>或<strong>英语</strong></p>
+<p>🌁  你可以任意使用应用内默认主题或任意第三方主题，强大的主题自定义能力</p>
+<p>🖥  你可以自定义源文件夹，利用 OneDrive、百度网盘、iCloud、Dropbox 等进行多设备同步</p>
+<p>🌱 当然 <strong>Gridea</strong> 还很年轻，有很多不足，但请相信，它会不停向前 🏃</p>
+<p>未来，它一定会成为你离不开的伙伴</p>
+<p>尽情发挥你的才华吧！</p>
+<p>😘 Enjoy~</p>
+]]></content>
+    </entry>
+</feed>

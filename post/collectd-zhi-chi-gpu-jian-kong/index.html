@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>collectd 支持gpu监控 | Gridea</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://colder219.github.io/favicon.ico?v=1669879403706">
+<link rel="stylesheet" href="https://colder219.github.io/styles/main.css">
+
+
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+
+
+
+    <meta name="description" content="刚发现我都打好包了，下面一条命令即可
+yum install datacenter-gpu-manager omg-gpu-collectd -y
+
+然后就可以直接在grafana那边看机器的监控了。
+下载collectd，编译打包
+col..." />
+    <meta name="keywords" content="" />
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://colder219.github.io">
+        <img src="https://colder219.github.io/images/avatar.png?v=1669879403706" class="site-logo">
+        <h1 class="site-title">Gridea</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      温故而知新
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://colder219.github.io/atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">collectd 支持gpu监控</h2>
+            <div class="post-date">2022-11-22</div>
+            
+            <div class="post-content" v-pre>
+              <h3 id="刚发现我都打好包了下面一条命令即可">刚发现我都打好包了，下面一条命令即可</h3>
+<pre><code>yum install datacenter-gpu-manager omg-gpu-collectd -y
+</code></pre>
+<p>然后就可以直接在grafana那边看机器的监控了。</p>
+<h2 id="下载collectd编译打包">下载collectd，编译打包</h2>
+<p>collectd 从5.8开始支持 nvidia 我们这里直接下载最新版并编译使支持</p>
+<blockquote>
+<p>参考</p>
+<p>https://collectd.org/download.shtml</p>
+<p>https://developer.nvidia.com/blog/gpu-telemetry-nvidia-dcgm/</p>
+</blockquote>
+<pre><code>wget https://storage.googleapis.com/collectd-tarballs/collectd-5.12.0.tar.bz2
+tar -xf collectd-5.12.0.tar.bz2
+cd collectd-5.12.0
+# 安装路径根据实际情况调整，编译的机器需要安装好cuda
+./configure --prefix /app/golang/collectd/ --enable-gpu-nvidia --with-cuda=/usr/local/cuda/
+make &amp;&amp; make install
+
+一般生产环境不止一台机器，每台都编译比较麻烦，可以根据实际情况，打一个安装包来给其它机器安装，这里给一下yum的方法
+这里是用了 fpm命令 具体如何使用 google一下
+build.sh
+
+mkdir -p rpm/package
+fpm -s dir -t rpm -n omg-collectd -v 1.0 \
+--rpm-user root --rpm-group root \
+--iteration $(date +&quot;%Y%m%d_%H%M%S&quot;) \
+-C $(pwd)/collectd \
+--description &quot;The XiaoChuanKeJi(IDC) Agent Package Created By SRE.&quot; \
+-d xiaochuan-supervisor \
+--pre-install $(pwd)/rpm/script/pre-install.sh \
+--post-install $(pwd)/rpm/script/install.sh \
+--post-uninstall $(pwd)/rpm/script/uninstall.sh \
+--after-upgrade $(pwd)/rpm/script/install.sh \
+--prefix /app/golang/collectd \
+-p $(pwd)/rpm/package
+
+</code></pre>
+<h2 id="安装dcgm">安装dcgm</h2>
+<p>dcgm 根据实际情况安装对应版本就行</p>
+<pre><code>yum erase -y datacenter-gpu-manager
+rpm -ivh datacenter-gpu-manager-1.7.2-1.x86_64.rpm
+systemctl enable --now dcgm.servic
+
+mkdir -p /usr/lib64/collectd/dcgm
+cp -rp /usr/local/dcgm/bindings/*.py  /usr/lib64/collectd/dcgm/
+cp -rp /usr/local/dcgm/samples/scripts/dcgm_collectd_plugin.py  /usr/lib64/collectd/dcgm/
+
+修改下脚本中g_dcgmLibPath 路径
+sed -i -e 's|\(g_dcgmLibPath =\) '&quot;'&quot;'/usr/lib'&quot;'&quot;'|\1 '&quot;'&quot;'/usr/lib64'&quot;'&quot;'|g' /usr/lib64/collectd/dcgm/dcgm_collectd_plugin.py
+
+给types.db 增加以下 这个文件根据你安装的增加
+如果influx第一次支持，在influxdb的types.db 也增加下下面的
+
+### DCGM types
+ecc_dbe_aggregate_total                  value:GAUGE:0:U
+ecc_sbe_aggregate_total                  value:GAUGE:0:U
+ecc_dbe_volatile_total                   value:GAUGE:0:U
+ecc_sbe_volatile_total                   value:GAUGE:0:U
+fb_free                                  value:GAUGE:0:U
+fb_total                                 value:GAUGE:0:U
+fb_used                                  value:GAUGE:0:U
+gpu_temp                                 value:GAUGE:U:U
+gpu_utilization                          value:GAUGE:0:100
+mem_copy_utilization                     value:GAUGE:0:100
+memory_clock                             value:GAUGE:0:U
+memory_temp                              value:GAUGE:U:U
+nvlink_bandwidth_total                   value:GAUGE:0:U
+nvlink_recovery_error_count_total        value:GAUGE:0:U
+nvlink_replay_error_count_total          value:GAUGE:0:U
+pcie_replay_counter                      value:GAUGE:0:U
+pcie_rx_throughput                       value:GAUGE:0:U
+pcie_tx_throughput                       value:GAUGE:0:U
+power_usage                              value:GAUGE:0:U
+power_violation                          value:GAUGE:0:U
+retired_pages_dbe                        value:GAUGE:0:U
+retired_pages_pending                    value:GAUGE:0:U
+retired_pages_sbe                        value:GAUGE:0:U
+sm_clock                                 value:GAUGE:0:U
+thermal_violation                        value:GAUGE:0:U
+total_energy_consumption                 value:GAUGE:0:U
+xid_errors                               value:GAUGE:0:U
+
+collectd.conf  增加以下
+
+LoadPlugin python
+&lt;Plugin python&gt;
+      ModulePath &quot;/usr/lib64/collectd/dcgm&quot;
+      LogTraces true
+      Interactive false
+      Import &quot;dcgm_collectd_plugin&quot;
+&lt;/Plugin&gt;
+
+然后重启collected
+
+如果日志有类似以下的内容 就说明collectd这边好了
+
+2021-10-19 19:39:31] uc_update: Value too old: name = sgal-omg-spam-newgpu01/dcgm_collectd-GPU-73dcaf1a-e5fe-b5eb-c417-ba9d4f726761/fb_total-0; value time = 1634643561.000; last cache update = 1634643561.000;
+
+</code></pre>
+<p>yum clean all &amp;&amp; yum remove omg-collectd -y &amp;&amp; rm -f /app/supervisor/conf/conf.d/collect.conf &amp;&amp; superctl update &amp;&amp; yum install omg-gpu-collectd -y</p>
+<p>yum clean all &amp;&amp; yum remove xiaochuan-collectd -y &amp;&amp; rm -f /app/supervisor/conf/conf.d/collect.conf &amp;&amp; superctl update &amp;&amp; yum install xiaochuan-gpu-collectd datacenter-gpu-manager -y</p>
+<h2 id="inluxdb">inluxdb</h2>
+<p>types.db增加以下</p>
+<pre><code>### DCGM types
+ecc_dbe_aggregate_total                  value:GAUGE:0:U
+ecc_sbe_aggregate_total                  value:GAUGE:0:U
+ecc_dbe_volatile_total                   value:GAUGE:0:U
+ecc_sbe_volatile_total                   value:GAUGE:0:U
+fb_free                                  value:GAUGE:0:U
+fb_total                                 value:GAUGE:0:U
+fb_used                                  value:GAUGE:0:U
+gpu_temp                                 value:GAUGE:U:U
+gpu_utilization                          value:GAUGE:0:100
+mem_copy_utilization                     value:GAUGE:0:100
+memory_clock                             value:GAUGE:0:U
+memory_temp                              value:GAUGE:U:U
+nvlink_bandwidth_total                   value:GAUGE:0:U
+nvlink_recovery_error_count_total        value:GAUGE:0:U
+nvlink_replay_error_count_total          value:GAUGE:0:U
+pcie_replay_counter                      value:GAUGE:0:U
+pcie_rx_throughput                       value:GAUGE:0:U
+pcie_tx_throughput                       value:GAUGE:0:U
+power_usage                              value:GAUGE:0:U
+power_violation                          value:GAUGE:0:U
+retired_pages_dbe                        value:GAUGE:0:U
+retired_pages_pending                    value:GAUGE:0:U
+retired_pages_sbe                        value:GAUGE:0:U
+sm_clock                                 value:GAUGE:0:U
+thermal_violation                        value:GAUGE:0:U
+total_energy_consumption                 value:GAUGE:0:U
+xid_errors                               value:GAUGE:0:U
+</code></pre>
+<p>查看有没有以下表 查一下数据 有的话说明数据已经进来了</p>
+<p>dcgm_collectd_value</p>
+<h2 id="grafana">grafana</h2>
+<p>创建一个dashboard 和一些panel</p>
+<p>也可以下载 <a href="https://raw.githubusercontent.com/colder219/picbed/master/imagesGPU-DASHBOARD2.json"> GPU-DASHBOARD.json</a> 导入即可</p>
+<figure data-type="image" tabindex="1"><img src="https://raw.githubusercontent.com/colder219/picbed/master/imagesscreen-shot2021-10-20%2011.32.47.jpg" alt="效果图片" loading="lazy"></figure>
+<figure data-type="image" tabindex="2"><img src="https://raw.githubusercontent.com/colder219/picbed/master/images202112231409799.jpg" alt="screen-shot 2021-07-12 at 17.44.36" loading="lazy"></figure>
+<p>不知道川皇能不能传上去</p>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://colder219.github.io/post/hello-gridea/">
+                  <h3 class="post-title">
+                    Hello Gridea
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+<script type="application/javascript">
+
+AOS.init();
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+
+
+  </body>
+</html>
